@@ -3,7 +3,7 @@ import redis
 import json
 import logging
 from typing import Any, Optional, Union
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -143,6 +143,8 @@ class RedisClient:
         """Custom JSON serializer for datetime objects"""
         if isinstance(obj, (datetime, )):
             return obj.isoformat()
+        elif isinstance(obj, date):  # Add this line
+            return obj.isoformat()   # Add this line
         elif hasattr(obj, '__dict__'):
             return obj.__dict__
         raise TypeError(f"Object of type {type(obj)} is not JSON serializable")

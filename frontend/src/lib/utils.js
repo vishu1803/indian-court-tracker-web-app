@@ -2,6 +2,9 @@
 import { clsx } from 'clsx';
 import { format, parseISO, isValid } from 'date-fns';
 
+// Import STORAGE_KEYS from constants
+import { STORAGE_KEYS } from './constants';
+
 // Utility for merging class names
 export function cn(...inputs) {
   return clsx(inputs);
@@ -81,13 +84,6 @@ export const validateYear = (year) => {
   return null;
 };
 
-// Loading states
-export const createLoadingState = () => ({
-  loading: false,
-  error: null,
-  data: null,
-});
-
 // Local storage utilities
 export const storage = {
   set: (key, value) => {
@@ -117,11 +113,5 @@ export const storage = {
   },
 };
 
-// Debounce function for search inputs
-export const debounce = (func, delay) => {
-  let timeoutId;
-  return (...args) => {
-    clearTimeout(timeoutId);
-    timeoutId = setTimeout(() => func(...args), delay);
-  };
-};
+// Re-export STORAGE_KEYS for convenience
+export { STORAGE_KEYS };
