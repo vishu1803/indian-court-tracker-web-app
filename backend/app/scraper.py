@@ -13,6 +13,7 @@ import urllib.parse
 
 from app.config import settings
 from app.redis_client import redis_client
+from app.utils.captcha_handler import CaptchaHandler
 
 logger = logging.getLogger(__name__)
 
@@ -23,555 +24,336 @@ class CourtsDataScraper:
         self.scraping_delay = settings.scraping_delay
         self.max_retries = settings.max_retries
         
-        # Setup robust requests session
-        self.session = requests.Session()
-        self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.9,hi;q=0.8',
-            'Accept-Encoding': 'gzip, deflate',
+        # Enhanced session setup with rotating User-Agents
+        self.user_agents = [
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Firefox/121.0',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Safari/605.1.15'
+        ]
+        
+        self.session = self._create_session()
+        self.captcha_handler = CaptchaHandler()
+        
+    def _create_session(self) -> requests.Session:
+        """Create a robust session with retry mechanism"""
+        session = requests.Session()
+        
+        # Rotate User-Agent
+        session.headers.update({
+            'User-Agent': random.choice(self.user_agents),
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
             'Connection': 'keep-alive',
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache'
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1'
         })
         
-        # Set timeout
-        self.session.timeout = 15
-    
+        # Set reasonable timeout
+        session.timeout = (5, 15)  # (connect timeout, read timeout)
+        
+        return session
+
+    async def _make_request(self, url: str, method: str = 'GET', data: Dict = None, 
+                           retry_count: int = 0) -> Optional[requests.Response]:
+        """Make HTTP request with captcha handling"""
+        try:
+            # Add jitter to delay
+            delay = self.scraping_delay + random.uniform(0.1, 0.5)
+            await asyncio.sleep(delay)
+            
+            # Rotate User-Agent on each request
+            self.session.headers['User-Agent'] = random.choice(self.user_agents)
+            
+            if method == 'POST':
+                response = self.session.post(url, data=data, allow_redirects=True)
+            else:
+                response = self.session.get(url, allow_redirects=True)
+            
+            response.raise_for_status()
+            
+            # Check for captcha
+            has_captcha, captcha_info = self.captcha_handler.detect_captcha(response.text)
+            
+            if has_captcha and captcha_info['image_url']:
+                logger.info("🔍 Captcha detected, attempting to solve...")
+                
+                # Solve captcha
+                captcha_solution = await self.captcha_handler.solve_captcha(
+                    captcha_info['image_url'], 
+                    self.session
+                )
+                
+                if captcha_solution:
+                    logger.info("✅ Captcha solved, retrying request with solution...")
+                    
+                    # Add captcha to data or params
+                    if method == 'POST':
+                        if not data:
+                            data = {}
+                        data[captcha_info['input_field'] or 'captcha'] = captcha_solution
+                    else:
+                        url = f"{url}{'&' if '?' in url else '?'}captcha={captcha_solution}"
+                    
+                    # Retry with captcha
+                    return await self._make_request(url, method, data, retry_count)
+                else:
+                    logger.warning("⚠️ Failed to solve captcha")
+            
+            return response
+            
+        except Exception as e:
+            if retry_count < self.max_retries:
+                wait_time = (retry_count + 1) * 2
+                logger.warning(f"Request failed, retrying in {wait_time}s: {str(e)}")
+                await asyncio.sleep(wait_time)
+                return await self._make_request(url, method, data, retry_count + 1)
+            raise
+
     async def search_case_comprehensive(self, case_type: str, case_number: str, year: int) -> Tuple[Dict[str, Any], int]:
-        """Enhanced case search using REAL court portal URLs"""
+        """Enhanced case search using real court portals"""
         start_time = time.time()
         
-        logger.info(f"🚀 REAL PORTAL SEARCH: {case_type} {case_number}/{year}")
+        logger.info(f"🔍 Searching: {case_type} {case_number}/{year}")
         
-        # Check cache
+        # Check cache first
         if redis_client.is_available():
             cached_data = redis_client.get_case_data(case_type, case_number, year)
             if cached_data:
-                execution_time = int((time.time() - start_time) * 1000)
-                cached_data['cached'] = True
-                logger.info(f"💾 CACHE HIT: {case_type} {case_number}/{year}")
-                return cached_data, execution_time
+                logger.info("💾 Cache hit!")
+                return cached_data, 0
         
         case_data = {
             'case_type': case_type.upper(),
             'case_number': case_number,
             'year': year,
             'found': False,
-            'cached': False,
-            'data_source': None,
-            'search_attempts': [],
-            'real_data_found': False
+            'portals_checked': []
+        }
+        
+        # Real portal URLs
+        portals = {
+            'ecourts': 'https://services.ecourts.gov.in/ecourtindia_v6/',
+            'delhi_hc': 'https://delhihighcourt.nic.in/',
+            'supremecourt': 'https://main.sci.gov.in/'
         }
         
         try:
-            # 1. Try High Court Services (for WP, CWP, PIL cases)
-            if case_type.upper() in ['WP', 'CWP', 'PIL']:
-                logger.info(f"🏛️ PHASE 1: High Court Services (case type: {case_type})")
-                hc_result = await self._try_high_court_services(case_type, case_number, year)
-                
-                if hc_result:
-                    case_data['search_attempts'].append({
-                        'portal': 'HIGH_COURT_SERVICES_REAL',
-                        'success': True,
-                        'details': hc_result.get('details', 'Portal accessed'),
-                        'services_found': hc_result.get('services_found', {}),
-                        'courts_available': len(hc_result.get('courts_available', []))
+            # Try each portal
+            for portal_name, base_url in portals.items():
+                try:
+                    logger.info(f"Trying {portal_name}...")
+                    response = await self._make_request(base_url)
+                    
+                    if response and response.status_code == 200:
+                        case_data['portals_checked'].append({
+                            'name': portal_name,
+                            'status': 'success',
+                            'url': base_url
+                        })
+                        
+                        # Extract case details based on portal
+                        case_info = await self._extract_case_info(response, case_type, case_number, year, portal_name)
+                        if case_info:
+                            case_data.update(case_info)
+                            case_data['found'] = True
+                            case_data['source_portal'] = portal_name
+                            break
+                            
+                except Exception as portal_err:
+                    logger.error(f"Portal {portal_name} error: {str(portal_err)}")
+                    case_data['portals_checked'].append({
+                        'name': portal_name,
+                        'status': 'error',
+                        'error': str(portal_err)
                     })
                     
-                    if hc_result.get('delhi_hc_available') and case_type.upper() in ['WP', 'CWP']:
-                        logger.info(f"🎯 CASE TYPE MATCH: {case_type} case suitable for Delhi High Court")
+                await asyncio.sleep(self.scraping_delay)
             
-            await asyncio.sleep(self.scraping_delay)
-            
-            # 2. Try District Court Services (for all case types)
-            logger.info(f"🏛️ PHASE 2: District Court Services")
-            district_result = await self._try_ecourts_portal(case_type, case_number, year)
-            
-            if district_result:
-                case_data['search_attempts'].append({
-                    'portal': 'DISTRICT_COURT_SERVICES_REAL',
-                    'success': True,
-                    'details': district_result.get('details', 'Portal accessed'),
-                    'form_found': district_result.get('case_search_form_found', False),
-                    'search_methods': district_result.get('search_methods_available', [])
-                })
-                
-                if district_result.get('case_search_form_found'):
-                    logger.info(f"🎯 FORM ACCESS: Real case search form accessible!")
-            
-            await asyncio.sleep(self.scraping_delay)
-            
-            # 3. Try Delhi High Court direct access
-            logger.info(f"🏛️ PHASE 3: Delhi High Court Direct")
-            delhi_result = await self._try_delhi_hc_direct(case_type, case_number, year)
-            
-            if delhi_result:
-                case_data['search_attempts'].append({
-                    'portal': 'DELHI_HC_DIRECT',
-                    'success': True,
-                    'details': delhi_result.get('details', 'Portal accessed'),
-                    'cause_lists_found': delhi_result.get('cause_lists_found', 0)
-                })
-                
-                if delhi_result.get('real_case_found'):
-                    case_data.update(delhi_result)
-                    case_data['found'] = True
-                    case_data['real_data_found'] = True
-                    case_data['data_source'] = 'DELHI_HC_DIRECT_REAL'
-                    logger.info(f"🎉 REAL CASE FOUND: Delhi High Court Direct")
-                    return case_data, int((time.time() - start_time) * 1000)
-            
-            # Analyze results and generate response
-            successful_portals = [attempt for attempt in case_data['search_attempts'] if attempt.get('success')]
-            
-            logger.info(f"📊 SEARCH SUMMARY:")
-            logger.info(f"   - Portals attempted: {len(case_data['search_attempts'])}")
-            logger.info(f"   - Successful connections: {len(successful_portals)}")
-            
-            for i, attempt in enumerate(successful_portals, 1):
-                logger.info(f"   {i}. {attempt['portal']}: {attempt['details']}")
-            
-            if not successful_portals:
-                logger.warning(f"❌ NO PORTAL ACCESS: Unable to connect to any eCourts portal")
-            else:
-                logger.info(f"✅ PORTAL ACCESS: Connected to {len(successful_portals)} real portals")
-            
-            # Generate informed response based on real portal analysis
-            sample_data = self._create_portal_informed_sample(case_type, case_number, year, case_data['search_attempts'])
-            case_data.update(sample_data)
-            case_data['found'] = True
-            case_data['data_source'] = 'REAL_PORTAL_INFORMED_SAMPLE'
+            # If no real data found, create informed sample
+            if not case_data['found']:
+                sample_data = self._create_informed_sample(case_type, case_number, year, case_data['portals_checked'])
+                case_data.update(sample_data)
+                case_data['found'] = True
+                case_data['is_sample'] = True
             
         except Exception as e:
-            logger.error(f"❌ SEARCH ERROR: {e}")
+            logger.error(f"Search error: {str(e)}")
             case_data['error'] = str(e)
-            sample_data = self._create_portal_informed_sample(case_type, case_number, year, [])
-            case_data.update(sample_data)
-            case_data['found'] = True
-            case_data['data_source'] = 'ERROR_FALLBACK'
-        
+            
         execution_time = int((time.time() - start_time) * 1000)
-        logger.info(f"⏱️ TOTAL SEARCH TIME: {execution_time}ms")
+        case_data['execution_time_ms'] = execution_time
         
-        # Cache results
+        # Cache the result
         if redis_client.is_available():
             redis_client.set_case_data(case_type, case_number, year, case_data)
         
         return case_data, execution_time
-    
-    async def _try_high_court_services(self, case_type: str, case_number: str, year: int) -> Optional[Dict]:
-        """Try REAL High Court Services using actual URL"""
+
+    async def _extract_case_info(self, response: requests.Response, case_type: str, 
+                               case_number: str, year: int, portal: str) -> Optional[Dict]:
+        """Extract case info with captcha handling"""
         try:
-            logger.info(f"🏛️ ACCESSING: REAL High Court Services Portal")
+            # Check for captcha before extraction
+            has_captcha, captcha_info = self.captcha_handler.detect_captcha(response.text)
             
-            # Use the ACTUAL high court URL
-            url = "https://hcservices.ecourts.gov.in/hcservices/main.php"
-            
-            logger.info(f"📡 REQUEST: GET {url}")
-            response = self.session.get(url, timeout=15)
-            logger.info(f"📊 RESPONSE: Status {response.status_code}, Size: {len(response.content)} bytes")
-            
-            if response.status_code == 200:
-                soup = BeautifulSoup(response.content, 'html.parser')
-                title = soup.title.string if soup.title else 'No title'
-                logger.info(f"📄 PAGE TITLE: {title}")
-                
-                # Look for the specific services mentioned in the attachment
-                services = {
-                    'CNR Number': 0,
-                    'Case Status': 0,
-                    'Court Orders': 0,
-                    'Cause List': 0,
-                    'Caveat Search': 0
-                }
-                
-                # Search for each service
-                for service_name in services.keys():
-                    service_links = soup.find_all(['a', 'button', 'div'], string=re.compile(service_name, re.I))
-                    services[service_name] = len(service_links)
-                    logger.info(f"🔍 {service_name.upper()}: Found {len(service_links)} elements")
-                
-                # Look for "Search Menu section"
-                search_menu_elements = soup.find_all(['div', 'section', 'menu'], string=re.compile(r'search.*menu', re.I))
-                search_menu_elements.extend(soup.find_all(['a', 'button'], string=re.compile(r'search', re.I)))
-                logger.info(f"🔍 SEARCH MENU: Found {len(search_menu_elements)} search menu elements")
-                
-                # Try to access Case Status
-                case_status_links = soup.find_all(['a', 'button'], string=re.compile(r'case.*status', re.I))
-                
-                if case_status_links:
-                    logger.info(f"🎯 ATTEMPTING: High Court Case Status access...")
-                    
-                    for link in case_status_links[:2]:
-                        try:
-                            href = link.get('href', '')
-                            if href:
-                                case_url = urllib.parse.urljoin(url, href)
-                                logger.info(f"📡 HC CASE STATUS: {case_url}")
-                                
-                                case_response = self.session.get(case_url, timeout=10)
-                                logger.info(f"📊 HC CASE RESPONSE: Status {case_response.status_code}")
-                                
-                                if case_response.status_code == 200:
-                                    case_content = case_response.text
-                                    
-                                    # Extract available high courts
-                                    hc_pattern = r'([\w\s]+high\s+court[\w\s]*)'
-                                    courts_found = re.findall(hc_pattern, case_content, re.IGNORECASE)
-                                    courts_found = list(set([court.strip() for court in courts_found if len(court.strip()) > 10]))
-                                    
-                                    logger.info(f"🏛️ HIGH COURTS FOUND: {len(courts_found)} courts")
-                                    if courts_found:
-                                        logger.info(f"🏛️ SAMPLE COURTS: {courts_found[:3]}")
-                                    
-                                    # Check if Delhi High Court is available for WP cases
-                                    if case_type.upper() in ['WP', 'CWP', 'PIL']:
-                                        delhi_found = any('delhi' in court.lower() for court in courts_found)
-                                        
-                                        if delhi_found:
-                                            logger.info(f"🎯 DELHI HC MATCH: {case_type} case type matches Delhi High Court")
-                                            
-                                            return {
-                                                'portal_accessible': True,
-                                                'high_court_services_functional': True,
-                                                'case_status_accessible': True,
-                                                'courts_available': courts_found,
-                                                'delhi_hc_available': True,
-                                                'case_type_match': case_type in ['WP', 'CWP', 'PIL'],
-                                                'services_found': services,
-                                                'details': f'Delhi High Court available for {case_type} cases',
-                                                'note': 'Real High Court Services with Delhi HC access for constitutional cases'
-                                            }
-                                    
-                                    if courts_found:
-                                        return {
-                                            'portal_accessible': True,
-                                            'high_court_services_functional': True,
-                                            'case_status_accessible': True,
-                                            'courts_available': courts_found,
-                                            'services_found': services,
-                                            'details': f'High Court Services functional with {len(courts_found)} courts'
-                                        }
-                                break
-                        except Exception as e:
-                            logger.debug(f"HC case status error: {e}")
-                            continue
-                
-                # Check Cause List functionality
-                cause_list_links = soup.find_all(['a', 'button'], string=re.compile(r'cause.*list', re.I))
-                
-                if cause_list_links:
-                    logger.info(f"📋 CAUSE LIST ACCESS: Found {len(cause_list_links)} cause list options")
-                    
-                    return {
-                        'portal_accessible': True,
-                        'cause_list_available': True,
-                        'cause_list_options': len(cause_list_links),
-                        'services_found': services,
-                        'details': f'High Court Services with {len(cause_list_links)} cause list options'
+            if has_captcha:
+                logger.info("🔍 Captcha detected in case info page...")
+                # Handle captcha and retry
+                if captcha_solution := await self.captcha_handler.solve_captcha(
+                    captcha_info['image_url'],
+                    self.session
+                ):
+                    # Prepare new request with captcha
+                    data = {
+                        'case_type': case_type,
+                        'case_number': case_number,
+                        'year': year,
+                        captcha_info['input_field'] or 'captcha': captcha_solution
                     }
-                
-                # At minimum, we accessed the portal
-                total_services = sum(services.values())
-                if total_services > 0:
-                    logger.info(f"✅ HC SERVICES ACCESSIBLE: {total_services} services found")
-                    return {
-                        'portal_accessible': True,
-                        'services_found': services,
-                        'total_services': total_services,
-                        'details': f'High Court Services portal with {total_services} service options'
-                    }
+                    
+                    # Retry with captcha
+                    new_response = await self._make_request(
+                        response.url,
+                        'POST',
+                        data
+                    )
+                    
+                    if new_response:
+                        response = new_response
+            
+            # Extract based on portal
+            soup = BeautifulSoup(response.content, 'html.parser')
+            
+            if portal == 'delhi_hc':
+                return await self._extract_delhi_hc_case(soup, case_type, case_number, year)
+            elif portal == 'ecourts':
+                return await self._extract_ecourts_case(soup, case_type, case_number, year)
+            elif portal == 'supremecourt':
+                return await self._extract_supreme_court_case(soup, case_type, case_number, year)
             
             return None
             
         except Exception as e:
-            logger.error(f"❌ HIGH COURT SERVICES ERROR: {e}")
-            return {'details': f'Connection error: {str(e)}', 'portal_accessible': False}
-    
-    async def _try_ecourts_portal(self, case_type: str, case_number: str, year: int) -> Optional[Dict]:
-        """Try REAL eCourts portal using actual URLs"""
+            logger.error(f"Case info extraction error: {str(e)}")
+            return None
+
+    async def _extract_delhi_hc_case(self, soup: BeautifulSoup, case_type: str, 
+                                   case_number: str, year: int) -> Optional[Dict]:
+        """Extract case details from Delhi High Court portal"""
         try:
-            logger.info(f"🌐 ACCESSING: REAL eCourts Portal")
-            
-            # Use the ACTUAL district court URL
-            url = "https://services.ecourts.gov.in/ecourtindia_v6/"
-            
-            logger.info(f"📡 REQUEST: GET {url}")
-            response = self.session.get(url, timeout=15)
-            logger.info(f"📊 RESPONSE: Status {response.status_code}, Size: {len(response.content)} bytes")
-            
-            if response.status_code == 200:
-                soup = BeautifulSoup(response.content, 'html.parser')
-                title = soup.title.string if soup.title else 'No title'
-                logger.info(f"📄 PAGE TITLE: {title}")
+            # Find case search form
+            search_form = soup.find('form', {'id': re.compile(r'case.*search|search.*form', re.I)})
+            if not search_form:
+                return None
                 
-                # Look for Case Status icon on the left menu
-                case_status_links = soup.find_all(['a', 'button', 'div'], string=re.compile(r'case.*status', re.I))
-                logger.info(f"🔍 CASE STATUS LINKS: Found {len(case_status_links)} case status elements")
-                
-                # Look for CNR number input (16 digit alphanumeric)
-                cnr_inputs = soup.find_all('input', {'placeholder': re.compile(r'cnr', re.I)})
-                cnr_inputs.extend(soup.find_all('input', {'name': re.compile(r'cnr', re.I)}))
-                logger.info(f"🔢 CNR INPUTS: Found {len(cnr_inputs)} CNR input fields")
-                
-                # Look for case registration number search
-                reg_inputs = soup.find_all('input', {'placeholder': re.compile(r'registration|case.*number', re.I)})
-                reg_inputs.extend(soup.find_all('input', {'name': re.compile(r'registration|case.*number', re.I)}))
-                logger.info(f"📝 REGISTRATION INPUTS: Found {len(reg_inputs)} registration number fields")
-                
-                # Look for party name, advocate name fields
-                party_inputs = soup.find_all('input', {'placeholder': re.compile(r'party.*name|advocate.*name', re.I)})
-                logger.info(f"👥 PARTY/ADVOCATE INPUTS: Found {len(party_inputs)} party/advocate fields")
-                
-                # Look for state/district selection
-                state_selects = soup.find_all('select')
-                state_options = []
-                for select in state_selects:
-                    options = select.find_all('option')
-                    if len(options) > 10:  # Likely state/district dropdown
-                        state_options.extend([opt.get_text().strip() for opt in options if opt.get('value')])
-                
-                logger.info(f"🗺️ STATE/DISTRICT OPTIONS: Found {len(state_options)} location options")
-                if state_options:
-                    logger.info(f"📍 SAMPLE LOCATIONS: {state_options[:5]}")
-                
-                # Try to access case status page
-                if case_status_links:
-                    logger.info(f"🎯 ATTEMPTING: Case Status search access...")
-                    
-                    for link in case_status_links[:2]:
-                        try:
-                            href = link.get('href', '')
-                            if href:
-                                case_status_url = urllib.parse.urljoin(url, href)
-                                logger.info(f"📡 CASE STATUS REQUEST: {case_status_url}")
-                                
-                                case_response = self.session.get(case_status_url, timeout=10)
-                                logger.info(f"📊 CASE STATUS RESPONSE: Status {case_response.status_code}")
-                                
-                                if case_response.status_code == 200:
-                                    case_soup = BeautifulSoup(case_response.content, 'html.parser')
-                                    
-                                    # Look for case search form
-                                    case_forms = case_soup.find_all('form')
-                                    logger.info(f"📝 CASE STATUS FORMS: Found {len(case_forms)} forms")
-                                    
-                                    for form in case_forms:
-                                        case_inputs = form.find_all('input')
-                                        for inp in case_inputs:
-                                            name = inp.get('name', '').lower()
-                                            placeholder = inp.get('placeholder', '').lower()
-                                            
-                                            # Check if this could be a case number field
-                                            if any(term in name or term in placeholder for term in ['case', 'number', 'registration']):
-                                                logger.info(f"🎯 FOUND CASE INPUT: name='{inp.get('name')}', placeholder='{inp.get('placeholder')}'")
-                                                
-                                                return {
-                                                    'portal_accessible': True,
-                                                    'case_search_form_found': True,
-                                                    'case_input_detected': True,
-                                                    'form_action': form.get('action', ''),
-                                                    'input_name': inp.get('name', ''),
-                                                    'input_placeholder': inp.get('placeholder', ''),
-                                                    'details': f'Real case search form found with input field: {inp.get("name", "unnamed")}',
-                                                    'note': 'REAL eCourts portal with functional case search form'
-                                                }
-                                break
-                        except Exception as e:
-                            logger.debug(f"Case status link error: {e}")
-                            continue
-                
-                # Portal is functional even without form access
-                if len(state_options) > 10 or case_status_links or cnr_inputs:
-                    logger.info(f"✅ PORTAL FUNCTIONAL: Real eCourts district portal confirmed")
-                    return {
-                        'portal_accessible': True,
-                        'portal_functional': True,
-                        'case_status_options': len(case_status_links),
-                        'cnr_search_available': len(cnr_inputs) > 0,
-                        'location_options': len(state_options),
-                        'search_methods_available': ['CNR', 'Case Status', 'Registration Number'],
-                        'details': f'Functional eCourts portal with {len(case_status_links)} search options',
-                        'note': 'Real eCourts district portal accessed successfully'
-                    }
-            
-            logger.warning(f"⚠️ LIMITED ACCESS: Portal response but limited functionality")
-            return {
-                'portal_accessible': response.status_code == 200,
-                'details': f'Portal responded with status {response.status_code}'
+            # Prepare search data
+            search_data = {
+                'case_type': case_type,
+                'case_no': case_number,
+                'case_year': year
             }
             
-        except Exception as e:
-            logger.error(f"❌ ECOURTS PORTAL ERROR: {e}")
-            return {'details': f'Connection error: {str(e)}', 'portal_accessible': False}
-    
-    async def _try_delhi_hc_direct(self, case_type: str, case_number: str, year: int) -> Optional[Dict]:
-        """Try Delhi High Court website directly"""
-        try:
-            logger.info(f"🏛️ ACCESSING: Delhi High Court Direct")
+            # Make search request
+            search_url = urllib.parse.urljoin('https://delhihighcourt.nic.in/', search_form['action'])
+            response = await self._make_request(search_url, 'POST', search_data)
             
-            urls = [
-                "http://delhihighcourt.nic.in",
-                "https://delhihighcourt.nic.in"
-            ]
-            
-            for url in urls:
-                try:
-                    logger.info(f"📡 REQUEST: GET {url}")
-                    response = self.session.get(url, timeout=8)
-                    logger.info(f"📊 RESPONSE: Status {response.status_code}, Size: {len(response.content)} bytes")
-                    
-                    if response.status_code == 200:
-                        soup = BeautifulSoup(response.content, 'html.parser')
-                        title = soup.title.string if soup.title else 'No title'
-                        logger.info(f"📄 PAGE TITLE: {title}")
-                        
-                        # Enhanced search for cause list related links
-                        all_links = soup.find_all('a', href=True)
-                        logger.info(f"🔗 TOTAL LINKS: Found {len(all_links)} links on page")
-                        
-                        # Broader search patterns
-                        cause_list_patterns = [
-                            r'cause.*list',
-                            r'daily.*list', 
-                            r'list.*case',
-                            r'today.*list',
-                            r'hearing.*list',
-                            r'calendar',
-                            r'roster'
-                        ]
-                        
-                        potential_cause_links = []
-                        for link in all_links:
-                            link_text = link.get_text().strip().lower()
-                            link_href = link.get('href', '').lower()
-                            
-                            for pattern in cause_list_patterns:
-                                if re.search(pattern, link_text, re.I) or re.search(pattern, link_href, re.I):
-                                    potential_cause_links.append({
-                                        'text': link.get_text().strip(),
-                                        'href': link.get('href', ''),
-                                        'pattern_matched': pattern
-                                    })
-                                    break
-                        
-                        logger.info(f"📋 POTENTIAL CAUSE LISTS: Found {len(potential_cause_links)} potential links")
-                        
-                        # Try to access cause lists and search for our case
-                        for link_info in potential_cause_links[:3]:
-                            try:
-                                cause_url = urllib.parse.urljoin(url, link_info['href'])
-                                if cause_url == url:
-                                    continue
-                                
-                                logger.info(f"📡 TRYING CAUSE LIST: {link_info['text']}")
-                                cause_response = self.session.get(cause_url, timeout=8)
-                                
-                                if cause_response.status_code == 200:
-                                    content = cause_response.text
-                                    
-                                    # Look for our specific case
-                                    case_patterns = [
-                                        rf'{case_type}.*{case_number}.*{year}',
-                                        rf'{case_type}\s*\(?C?\)?\s*{case_number}[/\s]*{year}',
-                                        rf'W\.P\.\(C\)\s*{case_number}[/\s]*{year}' if case_type == 'WP' else None
-                                    ]
-                                    
-                                    for pattern in case_patterns:
-                                        if pattern and re.search(pattern, content, re.IGNORECASE):
-                                            logger.info(f"🎉 REAL CASE FOUND: {case_type} {case_number}/{year} in Delhi HC!")
-                                            
-                                            # Extract context
-                                            match = re.search(rf'(.{{0,200}}){pattern}(.{{0,200}})', content, re.IGNORECASE)
-                                            context = match.group(0) if match else f"{case_type} {case_number}/{year}"
-                                            
-                                            # Try to extract parties and time
-                                            parties_match = re.search(r'([A-Z][A-Za-z\s]+)\s+[Vv]s?\s+([A-Za-z\s]+)', context)
-                                            time_match = re.search(r'(\d{1,2}:\d{2}(?:\s*[AP]M)?)', context)
-                                            
-                                            return {
-                                                'real_case_found': True,
-                                                'found_in_cause_list': True,
-                                                'court_name': 'Delhi High Court',
-                                                'court_type': 'HIGH_COURT',
-                                                'case_status': 'Listed for Hearing',
-                                                'parties_petitioner': parties_match.group(1).strip() if parties_match else f'Petitioner in {case_type} {case_number}/{year}',
-                                                'parties_respondent': parties_match.group(2).strip() if parties_match else 'Respondent',
-                                                'next_hearing_date': date.today() + timedelta(days=1),
-                                                'hearing_time': time_match.group(1) if time_match else '10:30 AM',
-                                                'filing_date': date(year, 6, 15),
-                                                'judge_name': 'Hon\'ble Court',
-                                                'court_hall': 'As per cause list',
-                                                'details': f'Exact match found in Delhi HC cause list: {link_info["text"]}',
-                                                'cause_list_url': cause_url,
-                                                'found_context': context[:200]
-                                            }
-                                    
-                                    # Extract any real cases for analysis
-                                    real_cases = self._extract_real_cases_from_content(content)
-                                    if real_cases:
-                                        logger.info(f"📊 REAL CASES EXTRACTED: {len(real_cases)} cases from {link_info['text']}")
-                            
-                            except Exception as e:
-                                logger.debug(f"Cause list access error: {e}")
-                                continue
-                        
-                        # Return basic access info
-                        return {
-                            'portal_accessible': True,
-                            'delhi_hc_accessible': True,
-                            'cause_lists_found': len(potential_cause_links),
-                            'website_url': url,
-                            'details': f'Delhi HC accessible, {len(potential_cause_links)} potential cause lists found'
-                        }
+            if response and response.status_code == 200:
+                result_soup = BeautifulSoup(response.content, 'html.parser')
                 
-                except requests.RequestException as e:
-                    logger.debug(f"Failed to access {url}: {e}")
-                    continue
-            
-            return None
-            
+                # Extract case details
+                case_details = {}
+                details_table = result_soup.find('table', {'class': re.compile(r'case.*details|details.*table')})
+                
+                if details_table:
+                    rows = details_table.find_all('tr')
+                    for row in rows:
+                        cols = row.find_all(['td', 'th'])
+                        if len(cols) >= 2:
+                            key = cols[0].get_text(strip=True)
+                            value = cols[1].get_text(strip=True)
+                            case_details[key] = value
+                
+                return {
+                    'court': 'Delhi High Court',
+                    'details': case_details,
+                    'status': case_details.get('Status', 'Pending'),
+                    'last_updated': datetime.now().isoformat(),
+                    'source': 'delhi_hc_real'
+                }
+                
         except Exception as e:
-            logger.error(f"❌ DELHI HC DIRECT ERROR: {e}")
-            return None
-    
-    def _extract_real_cases_from_content(self, content: str) -> List[Dict]:
-        """Extract real case numbers from content"""
+            logger.error(f"Delhi HC extraction error: {str(e)}")
+        return None
+
+    async def _extract_ecourts_case(self, soup: BeautifulSoup, case_type: str, 
+                                   case_number: str, year: int) -> Optional[Dict]:
+        """Extract case details from eCourts portal"""
         try:
-            real_cases = []
-            patterns = [
-                (r'W\.P\.\(C\)\s*(\d+)[/\s]*(\d{4})', 'WP'),
-                (r'CWP\s*(\d+)[/\s]*(\d{4})', 'CWP'),
-                (r'PIL\s*(\d+)[/\s]*(\d{4})', 'PIL'),
-                (r'CRL\s*(\d+)[/\s]*(\d{4})', 'CRL'),
-                (r'CA\s*(\d+)[/\s]*(\d{4})', 'CA')
-            ]
+            # Find case status section
+            status_section = soup.find('div', {'id': 'caseStatusDiv'})
+            if not status_section:
+                return None
             
-            for pattern, case_type in patterns:
-                matches = re.findall(pattern, content, re.IGNORECASE)
-                for match in matches[:3]:  # Limit per pattern
-                    case_num, case_year = match
-                    try:
-                        year_int = int(case_year)
-                        if 2020 <= year_int <= 2025:
-                            real_cases.append({
-                                'case_type': case_type,
-                                'case_number': case_num,
-                                'case_year': year_int,
-                                'source': 'REAL_CONTENT_EXTRACTION'
-                            })
-                    except:
-                        continue
+            # Extract case details
+            case_details = {}
+            rows = status_section.find_all('tr')
+            for row in rows:
+                cols = row.find_all('td')
+                if len(cols) >= 2:
+                    key = cols[0].get_text(strip=True)
+                    value = cols[1].get_text(strip=True)
+                    case_details[key] = value
             
-            return real_cases
-            
+            return {
+                'court': 'eCourts',
+                'details': case_details,
+                'status': case_details.get('Status', 'Pending'),
+                'last_updated': datetime.now().isoformat(),
+                'source': 'ecourts_real'
+            }
+        
         except Exception as e:
-            logger.error(f"Error extracting real cases: {e}")
-            return []
-    
-    def _create_portal_informed_sample(self, case_type: str, case_number: str, year: int, attempts: List[Dict]) -> Dict[str, Any]:
-        """Create sample data informed by real portal analysis"""
+            logger.error(f"eCourts extraction error: {str(e)}")
+        return None
+
+    async def _extract_supreme_court_case(self, soup: BeautifulSoup, case_type: str, 
+                                        case_number: str, year: int) -> Optional[Dict]:
+        """Extract case details from Supreme Court portal"""
+        try:
+            # Find case details section
+            details_section = soup.find('div', {'id': 'caseDetails'})
+            if not details_section:
+                return None
+            
+            # Extract case details
+            case_details = {}
+            rows = details_section.find_all('tr')
+            for row in rows:
+                cols = row.find_all('td')
+                if len(cols) >= 2:
+                    key = cols[0].get_text(strip=True)
+                    value = cols[1].get_text(strip=True)
+                    case_details[key] = value
+            
+            return {
+                'court': 'Supreme Court',
+                'details': case_details,
+                'status': case_details.get('Status', 'Pending'),
+                'last_updated': datetime.now().isoformat(),
+                'source': 'supreme_court_real'
+            }
+        
+        except Exception as e:
+            logger.error(f"Supreme Court extraction error: {str(e)}")
+        return None
+
+    def _create_informed_sample(self, case_type: str, case_number: str, year: int, 
+                              portal_checks: List[Dict]) -> Dict:
+        """Create sample data informed by portal checks"""
         
         # Court mapping based on real portal capabilities
         court_info = {
@@ -586,8 +368,8 @@ class CourtsDataScraper:
         
         # Analyze real portal access results
         portal_context = ""
-        if attempts:
-            successful_portals = [a['portal'] for a in attempts if a.get('success')]
+        if portal_checks:
+            successful_portals = [p['name'] for p in portal_checks if p.get('status') == 'success']
             if successful_portals:
                 portal_context = f" (Real portals accessed: {', '.join(successful_portals)})"
         
@@ -608,12 +390,11 @@ class CourtsDataScraper:
             'judgments': [],
             'real_portal_analysis': True,
             'recommended_portal': info['portal'],
-            'portals_attempted': len(attempts),
+            'portals_attempted': len(portal_checks),
             'note': f'Sample data after analyzing real eCourts portals. Case type {case_type} typically handled by {info["portal"]}.'
         }
     
     # CAUSE LIST METHODS
-    
     async def scrape_cause_list_comprehensive(self, target_date: date, court_filter: Optional[str] = None) -> Tuple[List[Dict], int]:
         """Comprehensive cause list scraping using real portals"""
         start_time = time.time()
@@ -646,15 +427,13 @@ class CourtsDataScraper:
         """Enhanced cause list extraction with content analysis"""
         try:
             logger.info(f"🏛️ CONNECTING: Delhi High Court for cause list...")
-            
             url = "http://delhihighcourt.nic.in"
             
             logger.info(f"📡 REQUEST: GET {url}")
-            response = self.session.get(url, timeout=8)
-            logger.info(f"📊 RESPONSE: Status {response.status_code}, Size: {len(response.content)} bytes")
+            response = await self._make_request(url)
             
-            if response.status_code != 200:
-                logger.warning(f"⚠️ HTTP ERROR: Status {response.status_code}")
+            if not response or response.status_code != 200:
+                logger.warning(f"⚠️ HTTP ERROR: Status {response.status_code if response else 'No response'}")
                 return []
             
             soup = BeautifulSoup(response.content, 'html.parser')
@@ -706,10 +485,9 @@ class CourtsDataScraper:
                         continue
                     
                     logger.info(f"📡 TRYING CAUSE LIST: {link_info['text']}")
-                    cause_response = self.session.get(cause_url, timeout=8)
-                    logger.info(f"📊 CAUSE LIST RESPONSE: Status {cause_response.status_code}")
+                    cause_response = await self._make_request(cause_url)
                     
-                    if cause_response.status_code == 200:
+                    if cause_response and cause_response.status_code == 200:
                         content = cause_response.text
                         logger.info(f"📄 CONTENT SIZE: {len(content)} characters")
                         
@@ -795,6 +573,40 @@ class CourtsDataScraper:
             logger.error(f"❌ REAL CAUSE LIST ERROR: {e}")
             return []
     
+    def _extract_real_cases_from_content(self, content: str) -> List[Dict]:
+        """Extract real case numbers from content"""
+        try:
+            real_cases = []
+            patterns = [
+                (r'W\.P\.\(C\)\s*(\d+)[/\s]*(\d{4})', 'WP'),
+                (r'CWP\s*(\d+)[/\s]*(\d{4})', 'CWP'),
+                (r'PIL\s*(\d+)[/\s]*(\d{4})', 'PIL'),
+                (r'CRL\s*(\d+)[/\s]*(\d{4})', 'CRL'),
+                (r'CA\s*(\d+)[/\s]*(\d{4})', 'CA')
+            ]
+            
+            for pattern, case_type in patterns:
+                matches = re.findall(pattern, content, re.IGNORECASE)
+                for match in matches[:3]:  # Limit per pattern
+                    case_num, case_year = match
+                    try:
+                        year_int = int(case_year)
+                        if 2020 <= year_int <= 2025:
+                            real_cases.append({
+                                'case_type': case_type,
+                                'case_number': case_num,
+                                'case_year': year_int,
+                                'source': 'REAL_CONTENT_EXTRACTION'
+                            })
+                    except:
+                        continue
+            
+            return real_cases
+            
+        except Exception as e:
+            logger.error(f"Error extracting real cases: {e}")
+            return []
+    
     def _generate_sample_cause_list_detailed(self, target_date: date, court_filter: Optional[str], context: str) -> List[Dict]:
         """Generate sample cause list with detailed context"""
         
@@ -852,10 +664,9 @@ class CourtsDataScraper:
             url = "https://hcservices.ecourts.gov.in/hcservices/main.php"
             logger.info(f"📡 REQUEST: GET {url}")
             
-            response = self.session.get(url, timeout=10)
-            logger.info(f"📊 RESPONSE: Status {response.status_code}")
+            response = await self._make_request(url)
             
-            if response.status_code == 200:
+            if response and response.status_code == 200:
                 soup = BeautifulSoup(response.content, 'html.parser')
                 
                 # Extract any high court references
