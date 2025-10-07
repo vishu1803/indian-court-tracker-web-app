@@ -1,74 +1,115 @@
-Indian Court Tracker 🏛️
+# **Indian Court Tracker 🏛️**
+
 A comprehensive web application for tracking Indian court cases and daily cause lists by scraping official High Court and District Court portals. Built with React.js frontend, FastAPI backend, and advanced web scraping capabilities.
-🚀 Features
-Case Search & Tracking
-•	🔍 Real-time Case Search - Search cases by type, number, and year
-•	🏛️ Multi-Portal Integration - Accesses High Court Services, District Courts, and Supreme Court portals
-•	📊 Case Details Extraction - Party names, filing dates, hearing dates, case status
-•	💾 Redis Caching - Fast response times with intelligent caching
-•	🔄 Real-time Updates - Automatic background jobs for case status updates
-Cause List Management
-•	📋 Daily Cause Lists - Fetch and display daily hearing lists
-•	🗓️ Date-based Filtering - View cause lists for specific dates
-•	🏛️ Court-wise Filtering - Filter by specific courts (High Court, District Court)
-•	📄 PDF Downloads - Download official cause list PDFs
-•	⚡ Real-time Extraction - Live scraping of court websites
-Advanced Web Scraping
-•	🤖 Captcha Handling - Automatic captcha detection and solving using OCR
-•	🔄 User-Agent Rotation - Avoid detection with rotating browser identities
-•	🛡️ Anti-Bot Protection - Sophisticated evasion techniques
-•	📊 Content Mining - Advanced regex patterns for data extraction
-•	🔁 Retry Mechanisms - Exponential backoff and error recovery
-Data Management
-•	🗄️ PostgreSQL Database - Robust data storage with SQLAlchemy ORM
-•	⚡ Redis Cache - High-performance caching layer
-•	📈 Background Jobs - Automated data updates and maintenance
-•	🔍 Full-text Search - Advanced search capabilities
-•	📊 Data Analytics - Case statistics and trends
-User Interface
-•	💻 Modern React UI - Responsive design with Tailwind CSS
-•	📱 Mobile Responsive - Optimized for all device sizes
-•	🎨 Intuitive Interface - User-friendly design for legal professionals
-•	📊 Data Visualization - Charts and graphs for case analytics
-•	🔄 Real-time Updates - Live updates without page refresh
-🛠️ Tech Stack
-Backend
-•	FastAPI - High-performance Python web framework
-•	SQLAlchemy - SQL toolkit and ORM
-•	PostgreSQL - Primary database
-•	Redis - Caching and session storage
-•	Pydantic - Data validation and serialization
-•	BeautifulSoup - HTML parsing and scraping
-•	Requests - HTTP client for API calls
-Frontend
-•	React.js 18 - Modern JavaScript framework
-•	TypeScript - Type-safe JavaScript
-•	Tailwind CSS - Utility-first CSS framework
-•	React Query - Data fetching and caching
-•	React Router - Client-side routing
-•	Axios - HTTP client
-Scraping & OCR
-•	Tesseract OCR - Captcha solving and text recognition
-•	OpenCV - Image processing for OCR enhancement
-•	Pillow (PIL) - Python image manipulation
-•	Pytesseract - Python wrapper for Tesseract
-DevOps & Deployment
-•	Docker - Containerization
-•	Docker Compose - Multi-container orchestration
-•	GitHub Actions - CI/CD pipeline
-•	Render - Cloud hosting platform
-📋 Prerequisites
-•	Python 3.8+
-•	Node.js 16+
-•	PostgreSQL 13+
-•	Redis 6+
-•	Tesseract OCR (for captcha solving)
-🚀 Quick Start
-1. Clone Repository
+
+## **🚀 Features**
+
+### **Case Search \& Tracking**
+
+- 🔍 **Real-time Case Search** - Search cases by type, number, and year
+- 🏛️ **Multi-Portal Integration** - Accesses High Court Services, District Courts, and Supreme Court portals
+- 📊 **Case Details Extraction** - Party names, filing dates, hearing dates, case status
+- 💾 **Redis Caching** - Fast response times with intelligent caching
+- 🔄 **Real-time Updates** - Automatic background jobs for case status updates
+
+
+### **Cause List Management**
+
+- 📋 **Daily Cause Lists** - Fetch and display daily hearing lists
+- 🗓️ **Date-based Filtering** - View cause lists for specific dates
+- 🏛️ **Court-wise Filtering** - Filter by specific courts (High Court, District Court)
+- 📄 **PDF Downloads** - Download official cause list PDFs
+- ⚡ **Real-time Extraction** - Live scraping of court websites
+
+
+### **Advanced Web Scraping**
+
+- 🤖 **Captcha Handling** - Automatic captcha detection and solving using OCR
+- 🔄 **User-Agent Rotation** - Avoid detection with rotating browser identities
+- 🛡️ **Anti-Bot Protection** - Sophisticated evasion techniques
+- 📊 **Content Mining** - Advanced regex patterns for data extraction
+- 🔁 **Retry Mechanisms** - Exponential backoff and error recovery
+
+
+### **Data Management**
+
+- 🗄️ **PostgreSQL Database** - Robust data storage with SQLAlchemy ORM
+- ⚡ **Redis Cache** - High-performance caching layer
+- 📈 **Background Jobs** - Automated data updates and maintenance
+- 🔍 **Full-text Search** - Advanced search capabilities
+- 📊 **Data Analytics** - Case statistics and trends
+
+
+### **User Interface**
+
+- 💻 **Modern React UI** - Responsive design with Tailwind CSS
+- 📱 **Mobile Responsive** - Optimized for all device sizes
+- 🎨 **Intuitive Interface** - User-friendly design for legal professionals
+- 📊 **Data Visualization** - Charts and graphs for case analytics
+- 🔄 **Real-time Updates** - Live updates without page refresh
+
+
+## **🛠️ Tech Stack**
+
+### **Backend**
+
+- **FastAPI** - High-performance Python web framework
+- **SQLAlchemy** - SQL toolkit and ORM
+- **PostgreSQL** - Primary database
+- **Redis** - Caching and session storage
+- **Pydantic** - Data validation and serialization
+- **BeautifulSoup** - HTML parsing and scraping
+- **Requests** - HTTP client for API calls
+
+
+### **Frontend**
+
+- **React.js 18** - Modern JavaScript framework
+- **TypeScript** - Type-safe JavaScript
+- **Tailwind CSS** - Utility-first CSS framework
+- **React Query** - Data fetching and caching
+- **React Router** - Client-side routing
+- **Axios** - HTTP client
+
+
+### **Scraping \& OCR**
+
+- **Tesseract OCR** - Captcha solving and text recognition
+- **OpenCV** - Image processing for OCR enhancement
+- **Pillow (PIL)** - Python image manipulation
+- **Pytesseract** - Python wrapper for Tesseract
+
+
+### **DevOps \& Deployment**
+
+- **Docker** - Containerization
+- **Docker Compose** - Multi-container orchestration
+- **GitHub Actions** - CI/CD pipeline
+- **Render** - Cloud hosting platform
+
+
+## **📋 Prerequisites**
+
+- **Python 3.8+**
+- **Node.js 16+**
+- **PostgreSQL 13+**
+- **Redis 6+**
+- **Tesseract OCR** (for captcha solving)
+
+
+## **🚀 Quick Start**
+
+### **1. Clone Repository**
+
+```bash
 git clone https://github.com/yourusername/indian-court-tracker.git
 cd indian-court-tracker
+```
 
-2. Backend Setup
+
+### **2. Backend Setup**
+
+```bash
 # Navigate to backend directory
 cd backend
 
@@ -87,26 +128,45 @@ pip install -r requirements.txt
 # Set up environment variables
 cp .env.example .env
 # Edit .env with your database and Redis configurations
+```
 
-3. Database Setup
+
+### **3. Database Setup**
+
+```bash
 # Create PostgreSQL database
 createdb court_tracker
 
 # Run migrations
 alembic upgrade head
+```
 
-4. Install Tesseract OCR
-Windows:
-1.	Download from: https://github.com/UB-Mannheim/tesseract/wiki
-2.	Install to: C:\Program Files\Tesseract-OCR\
-3.	Add to system PATH
-macOS:
+
+### **4. Install Tesseract OCR**
+
+#### **Windows:**
+
+1. Download from: https://github.com/UB-Mannheim/tesseract/wiki
+2. Install to: `C:\Program Files\Tesseract-OCR\`
+3. Add to system PATH
+
+#### **macOS:**
+
+```bash
 brew install tesseract
+```
 
-Ubuntu/Debian:
+
+#### **Ubuntu/Debian:**
+
+```bash
 sudo apt install tesseract-ocr
+```
 
-5. Frontend Setup
+
+### **5. Frontend Setup**
+
+```bash
 # Navigate to frontend directory
 cd ../frontend
 
@@ -115,17 +175,29 @@ npm install
 
 # Start development server
 npm start
+```
 
-6. Start Backend Server
+
+### **6. Start Backend Server**
+
+```bash
 # In backend directory
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+```
 
-7. Access Application
-•	Frontend: http://localhost:3000
-•	Backend API: http://localhost:8000
-•	API Documentation: http://localhost:8000/docs
-🐳 Docker Deployment
-Using Docker Compose
+
+### **7. Access Application**
+
+- **Frontend:** http://localhost:3000
+- **Backend API:** http://localhost:8000
+- **API Documentation:** http://localhost:8000/docs
+
+
+## **🐳 Docker Deployment**
+
+### **Using Docker Compose**
+
+```bash
 # Build and start all services
 docker-compose up -d
 
@@ -134,15 +206,24 @@ docker-compose logs -f
 
 # Stop services
 docker-compose down
+```
 
-Services Started:
-•	Backend API: Port 8000
-•	Frontend: Port 3000
-•	PostgreSQL: Port 5432
-•	Redis: Port 6379
-⚙️ Configuration
-Environment Variables
-Create .env file in the backend directory:
+
+### **Services Started:**
+
+- **Backend API:** Port 8000
+- **Frontend:** Port 3000
+- **PostgreSQL:** Port 5432
+- **Redis:** Port 6379
+
+
+## **⚙️ Configuration**
+
+### **Environment Variables**
+
+Create `.env` file in the backend directory:
+
+```env
 # Database Configuration
 DATABASE_URL=postgresql://username:password@localhost:5432/court_tracker
 
@@ -164,54 +245,88 @@ TESSERACT_CMD=C:\Program Files\Tesseract-OCR\tesseract.exe
 
 # Logging
 LOG_LEVEL=INFO
+```
 
-📊 API Endpoints
-Case Search
+
+## **📊 API Endpoints**
+
+### **Case Search**
+
+```http
 POST /api/v1/cases/search
 {
   "case_type": "WP",
   "case_number": "1234",
   "year": 2024
 }
+```
 
-Cause Lists
+
+### **Cause Lists**
+
+```http
 POST /api/v1/cause-lists/by-date
 {
   "hearing_date": "2024-10-07",
   "court_filter": "Delhi High Court"
 }
+```
 
-Available Courts
+
+### **Available Courts**
+
+```http
 GET /api/v1/cause-lists/courts
+```
 
-Health Check
+
+### **Health Check**
+
+```http
 GET /health
+```
 
-🎯 Supported Courts
-High Courts
-•	Delhi High Court
-•	Supreme Court of India
-•	Bombay High Court
-•	Punjab and Haryana High Court
-•	Calcutta High Court
-•	And more...
-Case Types
-•	WP - Writ Petition
-•	CWP - Civil Writ Petition
-•	PIL - Public Interest Litigation
-•	CRL - Criminal Cases
-•	CA - Civil Appeal
-•	CS - Civil Suit
-🔧 Advanced Features
-Captcha Solving
+
+## **🎯 Supported Courts**
+
+### **High Courts**
+
+- Delhi High Court
+- Supreme Court of India
+- Bombay High Court
+- Punjab and Haryana High Court
+- Calcutta High Court
+- And more...
+
+
+### **Case Types**
+
+- **WP** - Writ Petition
+- **CWP** - Civil Writ Petition
+- **PIL** - Public Interest Litigation
+- **CRL** - Criminal Cases
+- **CA** - Civil Appeal
+- **CS** - Civil Suit
+
+
+## **🔧 Advanced Features**
+
+### **Captcha Solving**
+
 The application includes advanced captcha handling:
+
+```python
 # Automatic captcha detection
 has_captcha, captcha_info = captcha_handler.detect_captcha(html_content)
 
 # OCR-based solving
 captcha_solution = await captcha_handler.solve_captcha(captcha_url, session)
+```
 
-Real Data Extraction
+
+### **Real Data Extraction**
+
+```python
 # Multi-portal search
 portals = {
     'ecourts': 'https://services.ecourts.gov.in/ecourtindia_v6/',
@@ -221,72 +336,115 @@ portals = {
 
 # Extract real case information
 case_info = await extract_case_info(response, case_type, case_number, year)
+```
 
-Background Jobs
+
+### **Background Jobs**
+
+```python
 # Daily cause list updates
 @scheduler.scheduled_job("cron", hour=6, minute=0)  # 6:00 AM daily
 async def update_daily_cause_lists():
     # Fetch and store cause lists
     pass
+```
 
-🚦 Troubleshooting
-Common Issues
-Tesseract Not Found
+
+## **🚦 Troubleshooting**
+
+### **Common Issues**
+
+#### **Tesseract Not Found**
+
+```bash
 # Error: tesseract is not recognized
 # Solution: Add Tesseract to system PATH
 export PATH=$PATH:/usr/local/bin/tesseract  # macOS/Linux
 # Or set in Python:
 pytesseract.pytesseract.tesseract_cmd = '/path/to/tesseract'
+```
 
-Database Connection
+
+#### **Database Connection**
+
+```bash
 # Error: could not connect to server
 # Check PostgreSQL service status
 sudo systemctl status postgresql  # Linux
 brew services list | grep postgres  # macOS
+```
 
-Redis Connection
+
+#### **Redis Connection**
+
+```bash
 # Error: Redis connection failed
 # Start Redis server
 redis-server  # Default configuration
 # Or
 sudo systemctl start redis  # Linux
+```
 
-Scraping Blocked
+
+#### **Scraping Blocked**
+
+```bash
 # Error: HTTP 403 or captcha challenges
 # The scraper includes:
 # - User-agent rotation
 # - Request delays
 # - Captcha solving
 # - Retry mechanisms
+```
 
-📈 Performance
-•	Response Time: < 500ms (cached data)
-•	Scraping Speed: 2-3 seconds per case search
-•	Cache Hit Rate: ~80% for repeated queries
-•	Concurrent Users: 100+ supported
-•	Database: Handles 10K+ cases efficiently
-🤝 Contributing
-1.	Fork the repository
-2.	Create feature branch (git checkout -b feature/amazing-feature)
-3.	Commit changes (git commit -m 'Add amazing feature')
-4.	Push to branch (git push origin feature/amazing-feature)
-5.	Open Pull Request
-Development Guidelines
-•	Follow PEP 8 for Python code
-•	Use TypeScript for frontend
-•	Add tests for new features
-•	Update documentation
 
-⚠️ Disclaimer
+## **📈 Performance**
+
+- **Response Time:** < 500ms (cached data)
+- **Scraping Speed:** 2-3 seconds per case search
+- **Cache Hit Rate:** ~80% for repeated queries
+- **Concurrent Users:** 100+ supported
+- **Database:** Handles 10K+ cases efficiently
+
+
+## **🤝 Contributing**
+
+1. **Fork the repository**
+2. **Create feature branch** (`git checkout -b feature/amazing-feature`)
+3. **Commit changes** (`git commit -m 'Add amazing feature'`)
+4. **Push to branch** (`git push origin feature/amazing-feature`)
+5. **Open Pull Request**
+
+### **Development Guidelines**
+
+- Follow PEP 8 for Python code
+- Use TypeScript for frontend
+- Add tests for new features
+- Update documentation
+
+
+
+
+## **⚠️ Disclaimer**
+
 This application is for educational and research purposes. Always respect the terms of service of the court websites being scraped. Use responsibly and ensure compliance with applicable laws and regulations.
 
-🙏 Acknowledgments
-•	eCourts Portal - Government of India's digital courts initiative
-•	High Court Websites - Various state High Courts
-•	Open Source Libraries - All the amazing libraries that made this possible
- 
-Built with ❤️ for the Indian legal community
-📊 Project Structure
+
+
+
+## **🙏 Acknowledgments**
+
+- **eCourts Portal** - Government of India's digital courts initiative
+- **High Court Websites** - Various state High Courts
+- **Open Source Libraries** - All the amazing libraries that made this possible
+
+***
+
+**Built with ❤️ for the Indian legal community**
+
+## **📊 Project Structure**
+
+```
 indian-court-tracker/
 ├── backend/
 │   ├── app/
@@ -318,4 +476,4 @@ indian-court-tracker/
 ├── docker-compose.yml
 ├── README.md
 └── LICENSE
-
+```
